@@ -55,9 +55,13 @@ def get_items_list(session, url, retries, extensions, only_export, custom_path=N
     download_path = get_and_prepare_download_path(custom_path, album_name)
     already_downloaded_url = get_already_downloaded_url(download_path)
 
-    for item in items:
+    for item_index, item in enumerate(items):
         if not direct_link:
+            orig_url = item['url']
             item = get_real_download_url(session, item['url'], is_bunkr)
+            if item['url'] == '/':
+                print(f"unable to find a download link for file https://bunkr.si{orig_url}")
+                continue
             if item is None:
                 print(f"\t\t[-] Unable to find a download link")
                 continue
@@ -85,7 +89,7 @@ def get_items_list(session, url, retries, extensions, only_export, custom_path=N
 def get_real_download_url(session, url, is_bunkr=True):
 
     if is_bunkr:
-        url = url if 'https' in url else f'https://bunkr.sk{url}'
+        url = url if 'https' in url else f'https://bunkr.si{url}'
     else:
         url = url.replace('/f/','/api/f/')
 
@@ -135,7 +139,7 @@ def create_session():
     session = requests.Session()
     session.headers.update({
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
-        'Referer': 'https://bunkr.sk/',
+        'Referer': 'https://bunkr.si/',
     })
     return session
 
