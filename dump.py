@@ -55,13 +55,15 @@ def get_items_list(session, url, retries, extensions, only_export, custom_path=N
     download_path = get_and_prepare_download_path(custom_path, album_name)
     already_downloaded_url = get_already_downloaded_url(download_path)
 
-    for item in items:
+    for item_index, item in enumerate(items):
         if not direct_link:
-            encrypted_url = item['url']
-            item = get_real_download_url(session, encrypted_url, is_bunkr)
-            if item is None or item["url"] == "/":
-                print(f"\t\t[-] Unable to find a download link for URL {encrypted_url}")
+            orig_url = item['url']
+            item = get_real_download_url(session, item['url'], is_bunkr)
+            if item['url'] == '/':
+                print(f"unable to find a download link for file https://bunkr.si{orig_url}")
                 continue
+            if item is None:
+                print(f"[-] Unable to find a download link")
 
         extension = get_url_data(item['url'])['extension']
         if ((extension in extensions_list or len(extensions_list) == 0) and (item['url'] not in already_downloaded_url)):
@@ -70,7 +72,7 @@ def get_items_list(session, url, retries, extensions, only_export, custom_path=N
             else:
                 for i in range(1, retries + 1):
                     try:
-                        print(f"\t[+] Downloading {item['url']} (try {i}/{retries})")
+                        print(f"[+] Downloading {item['url']} (try {i}/{retries})")
                         download(session, item['url'], download_path, is_bunkr, item['name'] if not is_bunkr else None)
                         break
                     except requests.exceptions.ConnectionError as e:
@@ -80,7 +82,7 @@ def get_items_list(session, url, retries, extensions, only_export, custom_path=N
                         else:
                             raise e
 
-    print(f"\t[+] File list exported in {os.path.join(download_path, 'url_list.txt')}" if only_export else f"\t[+] Download completed")
+    print(f"[+] File list exported in {os.path.join(download_path, 'url_list.txt')}" if only_export else f"[+] Download completed")
     return
     
 def get_real_download_url(session, url, is_bunkr=True):
@@ -92,7 +94,7 @@ def get_real_download_url(session, url, is_bunkr=True):
 
     r = session.get(url)
     if r.status_code != 200:
-        print(f"\t[-] HTTP error {r.status_code} getting real url for {url}")
+        print(f"[-] HTTP error {r.status_code} getting real url for {url}")
         return None
 
     if is_bunkr:
@@ -115,10 +117,10 @@ def download(session, item_url, download_path, is_bunkr=False, file_name=None):
 
     with session.get(item_url, stream=True, timeout=5) as r:
         if r.status_code != 200:
-            print(f"\t[-] Error downloading \"{file_name}\": {r.status_code}")
+            print(f"[-] Error downloading \"{file_name}\": {r.status_code}")
             return
         if r.url == "https://bnkr.b-cdn.net/maintenance.mp4":
-            print(f"\t[-] Error downloading \"{file_name}\": Server is down for maintenance")
+            print(f"[-] Error downloading \"{file_name}\": Server is down for maintenance")
 
         file_size = int(r.headers.get('content-length', -1))
         with open(final_path, 'wb') as f:
@@ -131,7 +133,7 @@ def download(session, item_url, download_path, is_bunkr=False, file_name=None):
     if is_bunkr and file_size > -1:
         downloaded_file_size = os.stat(final_path).st_size
         if downloaded_file_size != file_size:
-            print(f"\t[-] {file_name} size check failed, file could be broken\n")
+            print(f"[-] {file_name} size check failed, file could be broken\n")
             return
 
     mark_as_downloaded(item_url, download_path)
@@ -200,7 +202,7 @@ def get_encryption_data(slug=None):
 
     r = session.post(BUNKR_VS_API_URL_FOR_SLUG, json={'slug': slug})
     if r.status_code != 200:
-        print(f"\t\t[-] HTTP ERROR {r.status_code} getting encryption data")
+        print(f"[-] HTTP ERROR {r.status_code} getting encryption data")
         return None
     
     return json.loads(r.content)
@@ -244,7 +246,7 @@ if __name__ == '__main__':
         with open(args.f, 'r', encoding='utf-8') as f:
             urls = f.read().splitlines()
         for url in urls:
-            print(f"\t[-] Processing \"{url}\"...")
+            print(f"[-] Processing \"{url}\"...")
             get_items_list(session, url, args.r, args.e, args.w, args.p)
         sys.exit(0)
     else:
