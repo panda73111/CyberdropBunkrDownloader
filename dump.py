@@ -57,9 +57,10 @@ def get_items_list(session, url, retries, extensions, only_export, custom_path=N
 
     for item in items:
         if not direct_link:
-            item = get_real_download_url(session, item['url'], is_bunkr)
-            if item is None:
-                print(f"\t\t[-] Unable to find a download link")
+            encrypted_url = item['url']
+            item = get_real_download_url(session, encrypted_url, is_bunkr)
+            if item is None or item["url"] == "/":
+                print(f"\t\t[-] Unable to find a download link for URL {encrypted_url}")
                 continue
 
         extension = get_url_data(item['url'])['extension']
@@ -85,7 +86,7 @@ def get_items_list(session, url, retries, extensions, only_export, custom_path=N
 def get_real_download_url(session, url, is_bunkr=True):
 
     if is_bunkr:
-        url = url if 'https' in url else f'https://bunkr.sk{url}'
+        url = url if 'https' in url else f'https://bunkr.si{url}'
     else:
         url = url.replace('/f/','/api/f/')
 
@@ -93,10 +94,16 @@ def get_real_download_url(session, url, is_bunkr=True):
     if r.status_code != 200:
         print(f"\t[-] HTTP error {r.status_code} getting real url for {url}")
         return None
-           
+
     if is_bunkr:
         slug = re.search(r'\/f\/(.*?)$', url).group(1)
-        return {'url': decrypt_encrypted_url(get_encryption_data(slug)), 'size': -1}
+        decrypted_url = decrypt_encrypted_url(get_encryption_data(slug))
+        return {'url': decrypted_url, 'size': -1}
+        # soup = BeautifulSoup(r.content, 'html.parser')
+        # videoElement = soup.find("video")
+        # videoSource = videoElement.get("currentSrc")
+        # videoName = soup.find("meta", property="og:title")
+        # return {'url': videoSource, 'size': -1, 'name': videoName}
     else:
         item_data = json.loads(r.content)
         return {'url': item_data['url'], 'size': -1, 'name': item_data['name']}
@@ -135,7 +142,7 @@ def create_session():
     session = requests.Session()
     session.headers.update({
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
-        'Referer': 'https://bunkr.sk/',
+        'Referer': 'https://bunkr.si/',
     })
     return session
 
@@ -187,7 +194,7 @@ def mark_as_downloaded(item_url, download_path):
     return
 
 def remove_illegal_chars(string):
-    return re.sub(r'[<>:"/\\|?*\']|[\0-\31]', "-", string).strip()
+    return re.sub(r'[<>:"/\\|?*\']|[\00-\031]', "-", string).strip()
 
 def get_encryption_data(slug=None):
 
