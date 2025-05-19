@@ -92,7 +92,6 @@ async def get_items_list(session: ClientSession, url: str, retries: int, extensi
 
         print(
             f"[+] File list exported in {os.path.join(download_path, 'url_list.txt')}" if only_export else f"[+] Download completed")
-        return
 
 
 async def get_real_download_url(session: ClientSession, url, is_bunkr=True):
