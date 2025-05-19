@@ -9,7 +9,7 @@ from math import floor
 from urllib.parse import urlparse
 
 import requests
-from aiohttp import ClientSession
+from aiohttp import ClientSession, ClientTimeout
 from bs4 import BeautifulSoup
 from tqdm import tqdm
 
@@ -119,7 +119,7 @@ async def download(session: ClientSession, item_url, download_path, is_bunkr=Fal
     file_name = get_url_data(item_url)['file_name'] if file_name is None else file_name
     final_path = os.path.join(download_path, file_name)
 
-    async with session.get(item_url, timeout=5) as response:
+    async with session.get(item_url) as response:
         if response.status != 200:
             print(f"[-] Error downloading \"{file_name}\": {response.status}")
             return
@@ -146,12 +146,13 @@ async def download(session: ClientSession, item_url, download_path, is_bunkr=Fal
 
 
 async def create_session():
+    session_timeout = ClientTimeout(total=None)
     session = ClientSession(headers={
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
                       'AppleWebKit/537.36 (KHTML, like Gecko) '
                       'Chrome/133.0.0.0 Safari/537.36',
         'Referer': 'https://bunkr.si/',
-    })
+    }, timeout=session_timeout)
     return session
 
 
