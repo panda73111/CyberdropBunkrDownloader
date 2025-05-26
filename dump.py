@@ -133,6 +133,7 @@ async def download(session: ClientSession, item_url, download_path, is_bunkr=Fal
                     if chunk is not None:
                         f.write(chunk)
                         pbar.update(len(chunk))
+                pbar.clear()
 
     if is_bunkr and file_size > -1:
         downloaded_file_size = os.stat(final_path).st_size
