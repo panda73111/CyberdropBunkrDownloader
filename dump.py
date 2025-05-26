@@ -65,7 +65,7 @@ async def get_items_list(session: ClientSession, url: str, retries: int, extensi
             if not direct_link:
                 orig_url = item['url']
                 item = await get_real_download_url(session, item['url'], is_bunkr)
-                if item['url'] == '/':
+                if item is None or item['url'] == '/':
                     print(f"unable to find a download link for file https://bunkr.si{orig_url}")
                     continue
                 if item is None:
