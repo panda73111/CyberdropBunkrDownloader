@@ -17,7 +17,7 @@ BUNKR_VS_API_URL_FOR_SLUG = "https://bunkr.cr/api/vs"
 SECRET_KEY_BASE = "SECRET_KEY_"
 
 
-async def get_items_list(session: ClientSession, url: str, retries: int, extensions, only_export, custom_path=None):
+async def get_items_list(session: ClientSession, url: str, retries: int, extensions, only_export, custom_path = ""):
     extensions_list = extensions.split(',') if extensions is not None else []
 
     async with session.get(url) as response:
@@ -106,7 +106,7 @@ async def get_real_download_url(session: ClientSession, url, is_bunkr=True):
             return None
 
         if is_bunkr:
-            slug = re.search(r'\/f\/(.*?)$', url).group(1)
+            slug = re.search(r'/f/(.*?)$', url).group(1)
             encryption_data = await get_encryption_data(session, slug)
             decrypted_url = decrypt_encrypted_url(encryption_data)
             return {'url': decrypted_url, 'size': -1}
@@ -162,7 +162,7 @@ def get_url_data(url):
             'hostname': parsed_url.hostname}
 
 
-def get_and_prepare_download_path(custom_path, album_name):
+def get_and_prepare_download_path(custom_path: str, album_name):
     final_path = 'downloads' if custom_path is None else custom_path
     final_path = os.path.join(final_path, album_name) if album_name is not None else 'downloads'
     final_path = final_path.replace('\n', '')
@@ -232,7 +232,7 @@ def decrypt_encrypted_url(encryption_data):
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(sys.argv[1:])
+    parser = argparse.ArgumentParser()
     parser.add_argument("-u", help="Url to fetch", type=str, required=False, default=None)
     parser.add_argument("-f", help="File to list of URLs to download", required=False, type=str, default=None)
     parser.add_argument("-r", help="Amount of retries in case the connection fails", type=int, required=False,
