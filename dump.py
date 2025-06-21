@@ -11,87 +11,89 @@ from urllib.parse import urlparse
 import requests
 from aiohttp import ClientSession, ClientTimeout
 from bs4 import BeautifulSoup
+from future.backports.xmlrpc.client import escape
+from samba.dcerpc.dcerpc import response
 from tqdm import tqdm
 
 BUNKR_VS_API_URL_FOR_SLUG = "https://bunkr.cr/api/vs"
 SECRET_KEY_BASE = "SECRET_KEY_"
 
 
-async def get_items_list(session: ClientSession, url: str, retries: int, extensions, only_export, custom_path = ""):
+async def get_items_list(session: ClientSession, url: str, retries: int, extensions, only_export, custom_path=""):
     extensions_list = extensions.split(',') if extensions is not None else []
 
-    async with session.get(url) as response:
-        if response.status != 200:
-            raise Exception(f"[-] HTTP error {response.status}")
+    response = await session.get(url)
+    if response.status != 200:
+        raise Exception(f"[-] HTTP error {response.status}")
 
-        response_text = await response.text()
+    response_text = await response.text()
+    soup = BeautifulSoup(response_text, 'html.parser')
+    is_bunkr = "| Bunkr" in soup.find('title').text
+
+    direct_link = False
+
+    if is_bunkr:
+        items = []
         soup = BeautifulSoup(response_text, 'html.parser')
-        is_bunkr = "| Bunkr" in soup.find('title').text
 
-        direct_link = False
+        direct_link = soup.find('span', {'class': 'ic-videos'}) is not None or soup.find('div', {
+            'class': 'lightgallery'}) is not None
+        if direct_link:
+            album_name = soup.find('h1', {'class': 'text-[20px]'})
+            if album_name is None:
+                album_name = soup.find('h1', {'class': 'truncate'})
 
-        if is_bunkr:
-            items = []
-            soup = BeautifulSoup(response_text, 'html.parser')
-
-            direct_link = soup.find('span', {'class': 'ic-videos'}) is not None or soup.find('div', {
-                'class': 'lightgallery'}) is not None
-            if direct_link:
-                album_name = soup.find('h1', {'class': 'text-[20px]'})
-                if album_name is None:
-                    album_name = soup.find('h1', {'class': 'truncate'})
-
-                album_name = remove_illegal_chars(album_name.text)
-                item = await get_real_download_url(session, url, True)
-                items.append(item)
-            else:
-                boxes = soup.find_all('a', {'class': 'after:absolute'})
-                for box in boxes:
-                    items.append({'url': box['href'], 'size': -1})
-
-                album_name = soup.find('h1', {'class': 'truncate'}).text
-                album_name = remove_illegal_chars(album_name)
+            album_name = remove_illegal_chars(album_name.text)
+            item = await get_real_download_url(session, url, True)
+            items.append(item)
         else:
-            items = []
-            items_dom = soup.find_all('a', {'class': 'image'})
-            for item_dom in items_dom:
-                items.append({'url': f"https://cyberdrop.me{item_dom['href']}", 'size': -1})
-            album_name = remove_illegal_chars(soup.find('h1', {'id': 'title'}).text)
+            boxes = soup.find_all('a', {'class': 'after:absolute'})
+            for box in boxes:
+                items.append({'url': box['href'], 'size': -1})
 
-        download_path = get_and_prepare_download_path(custom_path, album_name)
-        already_downloaded_url = get_already_downloaded_url(download_path)
+            album_name = soup.find('h1', {'class': 'truncate'}).text
+            album_name = remove_illegal_chars(album_name)
+    else:
+        items = []
+        items_dom = soup.find_all('a', {'class': 'image'})
+        for item_dom in items_dom:
+            items.append({'url': f"https://cyberdrop.me{item_dom['href']}", 'size': -1})
+        album_name = remove_illegal_chars(soup.find('h1', {'id': 'title'}).text)
 
-        for item_index, item in enumerate(items):
-            if not direct_link:
-                orig_url = item['url']
-                item = await get_real_download_url(session, item['url'], is_bunkr)
-                if item is None or item['url'] == '/':
-                    print(f"unable to find a download link for file https://bunkr.si{orig_url}")
-                    continue
-                if item is None:
-                    print(f"[-] Unable to find a download link")
+    download_path = get_and_prepare_download_path(custom_path, album_name)
+    already_downloaded_url = get_already_downloaded_url(download_path)
 
-            extension = get_url_data(item['url'])['extension']
-            if ((extension in extensions_list or len(extensions_list) == 0) and (
-                    item['url'] not in already_downloaded_url)):
-                if only_export:
-                    write_url_to_list(item['url'], download_path)
-                else:
-                    for i in range(1, retries + 1):
-                        try:
-                            print(f"[+] Downloading {item['url']} (try {i}/{retries})")
-                            await download(session, item['url'], download_path, is_bunkr,
-                                           item['name'] if not is_bunkr else None)
-                            break
-                        except requests.exceptions.ConnectionError as e:
-                            if i < retries:
-                                time.sleep(2)
-                                pass
-                            else:
-                                raise e
+    for item_index, item in enumerate(items):
+        if not direct_link:
+            orig_url = item['url']
+            item = await get_real_download_url(session, item['url'], is_bunkr)
+            if item is None or item['url'] == '/':
+                print(f"unable to find a download link for file https://bunkr.si{orig_url}")
+                continue
+            if item is None:
+                print(f"[-] Unable to find a download link")
 
-        print(
-            f"[+] File list exported in {os.path.join(download_path, 'url_list.txt')}" if only_export else f"[+] Download completed")
+        extension = get_url_data(item['url'])['extension']
+        if ((extension in extensions_list or len(extensions_list) == 0) and (
+                item['url'] not in already_downloaded_url)):
+            if only_export:
+                write_url_to_list(item['url'], download_path)
+            else:
+                for i in range(1, retries + 1):
+                    try:
+                        print(f"[+] Downloading {item['url']} (try {i}/{retries})")
+                        await download(session, item['url'], download_path, is_bunkr,
+                                       item['name'] if not is_bunkr else None)
+                        break
+                    except requests.exceptions.ConnectionError as e:
+                        if i < retries:
+                            time.sleep(2)
+                            pass
+                        else:
+                            raise e
+
+    print(
+        f"[+] File list exported in {os.path.join(download_path, 'url_list.txt')}" if only_export else f"[+] Download completed")
 
 
 async def get_real_download_url(session: ClientSession, url, is_bunkr=True):
@@ -232,7 +234,7 @@ def decrypt_encrypted_url(encryption_data):
     return decrypted_url
 
 
-if __name__ == '__main__':
+async def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-u", help="Url to fetch", type=str, required=False, default=None)
     parser.add_argument("-f", help="File to list of URLs to download", required=False, type=str, default=None)
@@ -247,32 +249,31 @@ if __name__ == '__main__':
 
     if args.u is None and args.f is None:
         print("[-] No URL or file provided")
-        sys.exit(1)
+        return 1
 
     if args.u is not None and args.f is not None:
         print("[-] Please provide only one URL or file")
-        sys.exit(1)
+        return 1
 
+    session = await create_session()
+
+    try:
+        if args.f is not None:
+            with open(args.f, 'r', encoding='utf-8') as f:
+                urls = f.read().splitlines()
+                urls = filter(bool, urls)
+            for url in urls:
+                print(f"[-] Processing \"{url}\"...")
+                await get_items_list(session, url, args.r, args.e, args.w, args.p)
+        else:
+            await get_items_list(session, args.u, args.r, args.e, args.w, args.p)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        await session.close()
+
+    return 0
+
+if __name__ == '__main__':
     loop = asyncio.get_event_loop()
-    session = loop.run_until_complete(create_session())
-
-    if args.f is not None:
-        with open(args.f, 'r', encoding='utf-8') as f:
-            urls = f.read().splitlines()
-        for url in urls:
-            print(f"[-] Processing \"{url}\"...")
-            func = get_items_list(session, url, args.r, args.e, args.w, args.p)
-            try:
-                loop.run_until_complete(func)
-                loop.run_until_complete(session.close())
-            except KeyboardInterrupt:
-                pass
-        sys.exit(0)
-    else:
-        func = get_items_list(session, args.u, args.r, args.e, args.w, args.p)
-        try:
-            loop.run_until_complete(func)
-            loop.run_until_complete(session.close())
-        except KeyboardInterrupt:
-            pass
-    sys.exit(0)
+    sys.exit(loop.run_until_complete(main()))
