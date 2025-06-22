@@ -12,6 +12,7 @@ import requests
 from aiohttp import ClientSession, ClientTimeout
 from bs4 import BeautifulSoup
 from tqdm import tqdm
+from os import EX_OK
 
 BUNKR_VS_API_URL_FOR_SLUG = "https://bunkr.cr/api/vs"
 SECRET_KEY_BASE = "SECRET_KEY_"
@@ -231,8 +232,7 @@ def decrypt_encrypted_url(encryption_data):
 
     return decrypted_url
 
-
-if __name__ == '__main__':
+async def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-u", help="Url to fetch", type=str, required=False, default=None)
     parser.add_argument("-f", help="File to list of URLs to download", required=False, type=str, default=None)
@@ -247,32 +247,32 @@ if __name__ == '__main__':
 
     if args.u is None and args.f is None:
         print("[-] No URL or file provided")
-        sys.exit(1)
+        return 1
 
     if args.u is not None and args.f is not None:
         print("[-] Please provide only one URL or file")
-        sys.exit(1)
+        return 1
 
-    loop = asyncio.get_event_loop()
-    session = loop.run_until_complete(create_session())
+    session = await create_session()
 
-    if args.f is not None:
-        with open(args.f, 'r', encoding='utf-8') as f:
-            urls = f.read().splitlines()
-        for url in urls:
-            print(f"[-] Processing \"{url}\"...")
-            func = get_items_list(session, url, args.r, args.e, args.w, args.p)
-            try:
-                loop.run_until_complete(func)
-                loop.run_until_complete(session.close())
-            except KeyboardInterrupt:
-                pass
-        sys.exit(0)
-    else:
-        func = get_items_list(session, args.u, args.r, args.e, args.w, args.p)
-        try:
-            loop.run_until_complete(func)
-            loop.run_until_complete(session.close())
-        except KeyboardInterrupt:
-            pass
-    sys.exit(0)
+    try:
+        if args.f is not None:
+            with open(args.f, 'r', encoding='utf-8') as f:
+                urls = f.read().splitlines()
+            for url in urls:
+                print(f"[-] Processing \"{url}\"...")
+                await get_items_list(session, url, args.r, args.e, args.w, args.p)
+            sys.exit(0)
+        else:
+            await get_items_list(session, args.u, args.r, args.e, args.w, args.p)
+
+    finally:
+        await session.close()
+
+    return EX_OK
+
+if __name__ == '__main__':
+    try:
+        sys.exit(asyncio.run(main()))
+    except KeyboardInterrupt:
+        sys.exit(EX_OK)
