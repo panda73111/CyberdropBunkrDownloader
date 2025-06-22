@@ -232,6 +232,7 @@ def decrypt_encrypted_url(encryption_data):
 
     return decrypted_url
 
+
 async def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-u", help="Url to fetch", type=str, required=False, default=None)
