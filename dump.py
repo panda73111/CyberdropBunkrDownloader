@@ -6,19 +6,19 @@ import sys
 import time
 from base64 import b64decode
 from math import floor
+from os import EX_OK
 from urllib.parse import urlparse
 
 import requests
 from aiohttp import ClientSession, ClientTimeout
 from bs4 import BeautifulSoup
 from tqdm import tqdm
-from os import EX_OK
 
 BUNKR_VS_API_URL_FOR_SLUG = "https://bunkr.cr/api/vs"
 SECRET_KEY_BASE = "SECRET_KEY_"
 
 
-async def get_items_list(session: ClientSession, url: str, retries: int, extensions, only_export, custom_path = ""):
+async def get_items_list(session: ClientSession, url: str, retries: int, extensions, only_export, custom_path=""):
     extensions_list = extensions.split(',') if extensions is not None else []
 
     async with session.get(url) as response:
@@ -29,41 +29,50 @@ async def get_items_list(session: ClientSession, url: str, retries: int, extensi
         soup = BeautifulSoup(response_text, 'html.parser')
         is_bunkr = "| Bunkr" in soup.find('title').text
 
-        direct_link = False
+        isDirectLink = "/f/" in url
+        albumName = None
 
         if is_bunkr:
             items = []
-            soup = BeautifulSoup(response_text, 'html.parser')
+            if isDirectLink:
+                albumName = soup.find('h1', {'class': 'truncate'}).strip()
+                albumName = remove_illegal_chars(albumName.text)
 
-            direct_link = soup.find('span', {'class': 'ic-videos'}) is not None or soup.find('div', {
-                'class': 'lightgallery'}) is not None
-            if direct_link:
-                album_name = soup.find('h1', {'class': 'text-[20px]'})
-                if album_name is None:
-                    album_name = soup.find('h1', {'class': 'truncate'})
-
-                album_name = remove_illegal_chars(album_name.text)
                 item = await get_real_download_url(session, url, True)
                 items.append(item)
             else:
-                boxes = soup.find_all('a', {'class': 'after:absolute'})
-                for box in boxes:
-                    items.append({'url': box['href'], 'size': -1})
+                itemLiks = soup.find_all('a', {'class': 'after:absolute'})
+                for itemLink in itemLiks:
+                    items.append({'url': itemLink['href'], 'size': -1})
 
-                album_name = soup.find('h1', {'class': 'truncate'}).text
-                album_name = remove_illegal_chars(album_name)
+                albumName = soup.find('h1', {'class': 'truncate'}).text.strip()
+                albumName = remove_illegal_chars(albumName)
         else:
+            headers = {"referer": "https://cyberdrop.me/"}
+            if isDirectLink:
+                slug = re.search(r'/f/(.*?)$', url).group(1)
+                async with session.get(f"https://api.cyberdrop.me/api/file/info/{slug}",
+                                       headers=headers) as infoResponse:
+                    infoJson = await infoResponse.json()
+                    item = {"name": infoJson["name"], "size": infoJson["size"]}
+                    authUrl = infoJson["auth_url"]
+                    async with session.get(f"https://api.cyberdrop.me/api/file/auth/{slug}",
+                                           headers=headers) as authResponse:
+                        authJson = await authResponse.json()
+                        item["url"] = authUrl
             items = []
-            items_dom = soup.find_all('a', {'class': 'image'})
-            for item_dom in items_dom:
-                items.append({'url': f"https://cyberdrop.me{item_dom['href']}", 'size': -1})
-            album_name = remove_illegal_chars(soup.find('h1', {'id': 'title'}).text)
+            itemLinks = soup.find_all('a', {'class': 'image'})
+            for itemLink in itemLinks:
+                items.append({'url': f"https://cyberdrop.me{itemLink['href']}", 'size': -1})
 
-        download_path = get_and_prepare_download_path(custom_path, album_name)
-        already_downloaded_url = get_already_downloaded_url(download_path)
+            if not isDirectLink:
+                albumName = remove_illegal_chars(soup.find('h1', {'id': 'title'}).text.strip())
+
+        download_path = get_and_prepare_download_path(custom_path, albumName)
+        already_downloaded_filenames = get_already_downloaded_filenames(download_path)
 
         for item_index, item in enumerate(items):
-            if not direct_link:
+            if not isDirectLink:
                 orig_url = item['url']
                 item = await get_real_download_url(session, item['url'], is_bunkr)
                 if item is None or item['url'] == '/':
@@ -74,7 +83,7 @@ async def get_items_list(session: ClientSession, url: str, retries: int, extensi
 
             extension = get_url_data(item['url'])['extension']
             if ((extension in extensions_list or len(extensions_list) == 0) and (
-                    item['url'] not in already_downloaded_url)):
+                    item['name'] not in already_downloaded_filenames)):
                 if only_export:
                     write_url_to_list(item['url'], download_path)
                 else:
@@ -95,41 +104,53 @@ async def get_items_list(session: ClientSession, url: str, retries: int, extensi
             f"[+] File list exported in {os.path.join(download_path, 'url_list.txt')}" if only_export else f"[+] Download completed")
 
 
-async def get_real_download_url(session: ClientSession, url, is_bunkr=True):
-    if is_bunkr:
-        url = url if 'https' in url else f'https://bunkr.si{url}'
-    else:
-        url = url.replace('/f/', '/api/f/')
-
+async def get_real_download_url(session: ClientSession, url, isBunknr=True):
     async with session.get(url) as response:
         if response.status != 200:
             print(f"[-] HTTP error {response.status} getting real url for {url}")
             return None
 
-        if is_bunkr:
-            slug = re.search(r'/f/(.*?)$', url).group(1)
+        slug = re.search(r'/f/(.*?)$', url).group(1)
+
+        if isBunknr:
             encryption_data = await get_encryption_data(session, slug)
             decrypted_url = decrypt_encrypted_url(encryption_data)
             return {'url': decrypted_url, 'size': -1}
         else:
-            item_data = await response.json()
-            return {'url': item_data['url'], 'size': -1, 'name': item_data['name']}
+            headers = {"Referer": "https://cyberdrop.me/"}
+            item = {"url": None, "size": -1, "name": None}
+            async with session.get(f"https://api.cyberdrop.me/api/file/info/{slug}", headers=headers) as infoResponse:
+                if infoResponse.status != 200:
+                    print(f"[-] HTTP error {response.status} getting real url for {url}")
+                    return None
+                infoJson = await infoResponse.json()
+                item["name"] = infoJson["name"]
+                item["size"] = infoJson["size"]
+                authUrl = infoJson["auth_url"]
+            async with session.get(f"https://api.cyberdrop.me/api/file/auth/{slug}", headers=headers) as authResponse:
+                if infoResponse.status != 200:
+                    print(f"[-] HTTP error {response.status} getting real url for {url}")
+                    return None
+                authJson = await authResponse.json()
+                item["url"] = authJson["url"]
+
+        return item
 
 
-async def download(session: ClientSession, item_url, download_path, is_bunkr=False, file_name=None):
-    file_name = get_url_data(item_url)['file_name'] if file_name is None else file_name
-    final_path = os.path.join(download_path, file_name)
+async def download(session: ClientSession, item_url, download_path, is_bunkr=False, filename=None):
+    filename = get_url_data(item_url)['file_name'] if filename is None else filename
+    final_path = os.path.join(download_path, filename)
 
     async with session.get(item_url) as response:
         if response.status != 200:
-            print(f"[-] Error downloading \"{file_name}\": {response.status}")
+            print(f"[-] Error downloading \"{filename}\": {response.status}")
             return
         if response.url == "https://bnkr.b-cdn.net/maintenance.mp4":
-            print(f"[-] Error downloading \"{file_name}\": Server is down for maintenance")
+            print(f"[-] Error downloading \"{filename}\": Server is down for maintenance")
 
         file_size = int(response.headers.get('content-length', -1))
         with open(final_path, 'wb') as f:
-            with tqdm(total=file_size, unit='iB', unit_scale=True, desc=file_name, leave=False) as pbar:
+            with tqdm(total=file_size, unit='iB', unit_scale=True, desc=filename, leave=False) as pbar:
                 async for chunk in response.content.iter_chunked(8192):
                     if chunk is not None:
                         f.write(chunk)
@@ -139,10 +160,10 @@ async def download(session: ClientSession, item_url, download_path, is_bunkr=Fal
     if is_bunkr and file_size > -1:
         downloaded_file_size = os.stat(final_path).st_size
         if downloaded_file_size != file_size:
-            print(f"[-] {file_name} size check failed, file could be broken\n")
+            print(f"[-] {filename} size check failed, file could be broken\n")
             return
 
-    mark_as_downloaded(item_url, download_path)
+    mark_as_downloaded(filename, download_path)
 
     return
 
@@ -189,7 +210,7 @@ def write_url_to_list(item_url, download_path):
     return
 
 
-def get_already_downloaded_url(download_path):
+def get_already_downloaded_filenames(download_path):
     file_path = os.path.join(download_path, 'already_downloaded.txt')
 
     if not os.path.isfile(file_path):
@@ -199,10 +220,10 @@ def get_already_downloaded_url(download_path):
         return f.read().splitlines()
 
 
-def mark_as_downloaded(item_url, download_path):
+def mark_as_downloaded(filename, download_path):
     file_path = os.path.join(download_path, 'already_downloaded.txt')
     with open(file_path, 'a', encoding='utf-8') as f:
-        f.write(f"{item_url}\n")
+        f.write(f"{filename}\n")
 
     return
 
@@ -271,6 +292,7 @@ async def main():
         await session.close()
 
     return EX_OK
+
 
 if __name__ == '__main__':
     try:
