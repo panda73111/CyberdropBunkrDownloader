@@ -43,7 +43,12 @@ async def get_items_list(session: ClientSession, url: str, retries: int, extensi
             else:
                 itemLiks = soup.find_all('a', {'class': 'after:absolute'})
                 for itemLink in itemLiks:
-                    items.append({'url': itemLink['href'], 'size': -1})
+                    href:str = itemLink['href']
+                    if href.startswith("/"):
+                        # link is relative, make it absolute
+                        responseUrl = response.url
+                        href = f"{responseUrl.scheme}://{responseUrl.host}{href}"
+                        items.append({'url': href, 'size': -1})
 
                 albumName = soup.find('h1', {'class': 'truncate'}).text.strip()
                 albumName = remove_illegal_chars(albumName)
@@ -76,7 +81,7 @@ async def get_items_list(session: ClientSession, url: str, retries: int, extensi
                 orig_url = item['url']
                 item = await get_real_download_url(session, item['url'], is_bunkr)
                 if item is None or item['url'] == '/':
-                    print(f"unable to find a download link for file https://bunkr.si{orig_url}")
+                    print(f"unable to find a download link for file {orig_url}")
                     continue
                 if item is None:
                     print(f"[-] Unable to find a download link")
@@ -104,7 +109,7 @@ async def get_items_list(session: ClientSession, url: str, retries: int, extensi
             f"[+] File list exported in {os.path.join(download_path, 'url_list.txt')}" if only_export else f"[+] Download completed")
 
 
-async def get_real_download_url(session: ClientSession, url, isBunknr=True):
+async def get_real_download_url(session: ClientSession, url, isBunkr=True):
     async with session.get(url) as response:
         if response.status != 200:
             print(f"[-] HTTP error {response.status} getting real url for {url}")
@@ -112,10 +117,10 @@ async def get_real_download_url(session: ClientSession, url, isBunknr=True):
 
         slug = re.search(r'/f/(.*?)$', url).group(1)
 
-        if isBunknr:
+        if isBunkr:
             encryption_data = await get_encryption_data(session, slug)
             decrypted_url = decrypt_encrypted_url(encryption_data)
-            return {'url': decrypted_url, 'size': -1}
+            return {'url': decrypted_url, 'size': -1, 'name': slug}
         else:
             headers = {"Referer": "https://cyberdrop.me/"}
             item = {"url": None, "size": -1, "name": None}
@@ -168,7 +173,7 @@ async def download(session: ClientSession, item_url, download_path, is_bunkr=Fal
     return
 
 
-async def create_session():
+async def createSession():
     session_timeout = ClientTimeout(total=None)
     session = ClientSession(headers={
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
@@ -275,7 +280,7 @@ async def main():
         print("[-] Please provide only one URL or file")
         return 1
 
-    session = await create_session()
+    session = await createSession()
 
     try:
         if args.f is not None:
